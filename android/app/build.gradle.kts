@@ -1,3 +1,4 @@
+import com.android.build.gradle.internal.api.ApkVariantOutputImpl
 import org.gradle.api.GradleException
 import org.gradle.api.tasks.Exec
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
@@ -200,6 +201,17 @@ android {
     sourceSets {
         getByName("main") {
             jniLibs.srcDir(androidGoJniLibsDir)
+        }
+    }
+
+    val abiCodes = mapOf("armeabi-v7a" to 1, "arm64-v8a" to 2, "x86_64" to 3)
+    applicationVariants.configureEach {
+        val variant = this
+        variant.outputs.forEach { output ->
+            val abiVersionCode = abiCodes[output.filters.find { it.filterType == "ABI" }?.identifier]
+            if (abiVersionCode != null) {
+                (output as ApkVariantOutputImpl).versionCodeOverride = variant.versionCode * 10 + abiVersionCode
+            }
         }
     }
 }
