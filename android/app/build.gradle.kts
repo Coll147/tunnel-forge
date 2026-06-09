@@ -280,6 +280,7 @@ tasks.register("buildAndroidGoNative") {
                     "build",
                     "-buildmode=c-shared",
                     "-trimpath",
+                    "-ldflags=-buildid=",
                     "-o",
                     outDir.resolve("libtunnel_gvisor.so").absolutePath,
                     ".",
