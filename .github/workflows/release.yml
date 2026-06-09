@@ -22,15 +22,15 @@ env:
   # Keep this exact key because fdroiddata reads it from this workflow.
   flutter-version: '90673a4eef275d1a6692c26ac80d6d746d41a73a'
 
-  FLUTTER_GIT_REVISION: '90673a4eef275d1a6692c26ac80d6d746d41a73a'
   FLUTTER_VERSION: '3.41.2'
+  FLUTTER_GIT_REVISION: '90673a4eef275d1a6692c26ac80d6d746d41a73a'
 
   ANDROID_PLATFORM: 'android-35'
   ANDROID_BUILD_TOOLS: '35.0.0'
   ANDROID_CMAKE: '3.22.1'
   ANDROID_NDK: '28.2.13676358'
 
-  # This path is intentionally stable so release APKs are deterministic.
+  # Stable path for deterministic release builds.
   RELEASE_BUILD_DIR: /builds/fdroid/fdroiddata/build/io.github.evokelektrique.tunnelforge
 
 defaults:
@@ -94,23 +94,60 @@ jobs:
 
       - name: Pin Flutter revision
         run: |
+          if ! git -C "${FLUTTER_ROOT}" cat-file -e "${FLUTTER_GIT_REVISION}^{commit}" 2>/dev/null; then
+            git -C "${FLUTTER_ROOT}" fetch --force --depth=1 origin "${FLUTTER_GIT_REVISION}"
+          fi
+
           git -C "${FLUTTER_ROOT}" checkout -f "${FLUTTER_GIT_REVISION}"
+          flutter config --no-analytics
           flutter --version
+
+      - name: Locate Android SDK manager
+        id: android_sdk
+        run: |
+          android_sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+
+          if [[ ! -d "${android_sdk_root}" ]]; then
+            echo "Android SDK directory not found: ${android_sdk_root}" >&2
+            exit 1
+          fi
+
+          sdkmanager_bin=""
+
+          while IFS= read -r candidate; do
+            if [[ -x "${candidate}" ]]; then
+              sdkmanager_bin="${candidate}"
+              break
+            fi
+          done < <(find "${android_sdk_root}/cmdline-tools" -path "*/bin/sdkmanager" -type f 2>/dev/null | sort -V -r)
+
+          if [[ -z "${sdkmanager_bin}" ]]; then
+            echo "sdkmanager not found under ${android_sdk_root}" >&2
+            find "${android_sdk_root}" -name sdkmanager -type f -print || true
+            exit 1
+          fi
+
+          echo "ANDROID_HOME=${android_sdk_root}" >> "${GITHUB_ENV}"
+          echo "ANDROID_SDK_ROOT=${android_sdk_root}" >> "${GITHUB_ENV}"
+          echo "SDKMANAGER=${sdkmanager_bin}" >> "${GITHUB_ENV}"
+
+          echo "Using Android SDK: ${android_sdk_root}"
+          echo "Using sdkmanager: ${sdkmanager_bin}"
 
       - name: Install Android build toolchain
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
+          yes | "${SDKMANAGER}" --licenses >/dev/null || true
 
-          yes | sdkmanager \
+          yes | "${SDKMANAGER}" \
             "platforms;${ANDROID_PLATFORM}" \
             "build-tools;${ANDROID_BUILD_TOOLS}" \
             "cmake;${ANDROID_CMAKE}" \
             "ndk;${ANDROID_NDK}"
 
-      - name: Install Go
+      - name: Install release build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y golang-go
+          sudo apt-get install -y golang-go rsync
           go version
 
       - name: Set up Gradle
@@ -170,6 +207,7 @@ jobs:
       - name: Resolve Flutter dependencies
         working-directory: ${{ env.RELEASE_BUILD_DIR }}
         run: |
+          export PUB_CACHE="${RELEASE_BUILD_DIR}/.pub-cache"
           flutter pub get --enforce-lockfile
 
       - name: Resolve Android Go dependencies
@@ -187,6 +225,7 @@ jobs:
           TUNNEL_FORGE_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           TUNNEL_FORGE_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
+          export PUB_CACHE="${RELEASE_BUILD_DIR}/.pub-cache"
           flutter clean
           flutter pub get --enforce-lockfile
           flutter build apk --release --split-per-abi --target-platform android-arm64
@@ -205,6 +244,7 @@ jobs:
           TUNNEL_FORGE_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           TUNNEL_FORGE_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
+          export PUB_CACHE="${RELEASE_BUILD_DIR}/.pub-cache"
           flutter clean
           flutter pub get --enforce-lockfile
           flutter build apk --release --split-per-abi --target-platform android-x64
