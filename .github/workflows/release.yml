@@ -19,7 +19,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # Keep this exact key because fdroiddata reads it from this file.
+  # Keep this exact key because fdroiddata extracts it from this workflow.
   flutter-version: '90673a4eef275d1a6692c26ac80d6d746d41a73a'
 
   FLUTTER_GIT_REVISION: '90673a4eef275d1a6692c26ac80d6d746d41a73a'
@@ -29,8 +29,8 @@ env:
   ANDROID_CMAKE: '3.22.1'
   ANDROID_NDK: '28.2.13676358'
 
-  REPRO_BUILD_ROOT: /home/vagrant/build
-  REPRO_BUILD_DIR: /home/vagrant/build/io.github.evokelektrique.tunnelforge
+  REPRO_ROOT: /home/vagrant/build
+  REPRO_SOURCE_DIR: /home/vagrant/build/io.github.evokelektrique.tunnelforge
   REPRO_FLUTTER_DIR: /home/vagrant/build/srclib/flutter
   REPRO_ANDROID_SDK: /opt/android-sdk
 
@@ -86,22 +86,22 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Install build dependencies
+      - name: Install host build dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y golang-go rsync unzip zip
           go version
 
-      - name: Set up Flutter
+      - name: Set up Flutter in reproducible path
         run: |
           sudo mkdir -p "$(dirname "${REPRO_FLUTTER_DIR}")"
           sudo chown -R "$USER:$USER" /home/vagrant
 
           rm -rf "${REPRO_FLUTTER_DIR}"
-          git init "${REPRO_FLUTTER_DIR}"
-          git -C "${REPRO_FLUTTER_DIR}" remote add origin https://github.com/flutter/flutter.git
-          git -C "${REPRO_FLUTTER_DIR}" fetch --depth=1 origin "${FLUTTER_GIT_REVISION}"
-          git -C "${REPRO_FLUTTER_DIR}" checkout -f FETCH_HEAD
+
+          # Full clone, not shallow. Shallow Flutter clones can report 0.0.0-unknown.
+          git clone https://github.com/flutter/flutter.git "${REPRO_FLUTTER_DIR}"
+          git -C "${REPRO_FLUTTER_DIR}" checkout -f "${FLUTTER_GIT_REVISION}"
 
           echo "${REPRO_FLUTTER_DIR}/bin" >> "${GITHUB_PATH}"
           echo "FLUTTER_ROOT=${REPRO_FLUTTER_DIR}" >> "${GITHUB_ENV}"
@@ -109,7 +109,13 @@ jobs:
           "${REPRO_FLUTTER_DIR}/bin/flutter" config --no-analytics
           "${REPRO_FLUTTER_DIR}/bin/flutter" --version
 
-      - name: Prepare Android SDK
+          sdk_version="$("${REPRO_FLUTTER_DIR}/bin/flutter" --version | head -n1)"
+          if [[ "${sdk_version}" == *"0.0.0-unknown"* ]]; then
+            echo "Flutter version detection failed: ${sdk_version}" >&2
+            exit 1
+          fi
+
+      - name: Prepare Android SDK in reproducible path
         run: |
           default_android_sdk="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
 
@@ -149,7 +155,7 @@ jobs:
           echo "Using Android SDK: ${REPRO_ANDROID_SDK}"
           echo "Using sdkmanager: ${sdkmanager_bin}"
 
-      - name: Install Android toolchain
+      - name: Install Android build toolchain
         run: |
           run_sdkmanager() {
             set +o pipefail
@@ -191,37 +197,36 @@ jobs:
 
       - name: Prepare arm64-v8a source workspace
         run: |
-          rm -rf "${REPRO_BUILD_DIR}"
-          mkdir -p "${REPRO_BUILD_DIR}"
+          rm -rf "${REPRO_SOURCE_DIR}"
+          mkdir -p "${REPRO_SOURCE_DIR}"
 
           rsync -a --delete \
             --exclude build \
             --exclude .dart_tool \
             --exclude .gradle \
-            ./ "${REPRO_BUILD_DIR}/"
+            ./ "${REPRO_SOURCE_DIR}/"
 
           {
             echo "flutter.sdk=${REPRO_FLUTTER_DIR}"
             echo "sdk.dir=${REPRO_ANDROID_SDK}"
             echo "ndk.dir=${REPRO_ANDROID_SDK}/ndk/${ANDROID_NDK}"
-          } > "${REPRO_BUILD_DIR}/android/local.properties"
+          } > "${REPRO_SOURCE_DIR}/android/local.properties"
 
-      - name: Resolve arm64-v8a dependencies
-        working-directory: ${{ env.REPRO_BUILD_DIR }}
+      - name: Resolve arm64-v8a Flutter dependencies
+        working-directory: ${{ env.REPRO_SOURCE_DIR }}
         run: |
           export PUB_CACHE="$(pwd)/.pub-cache"
-          "${REPRO_FLUTTER_DIR}/bin/flutter" config --no-analytics
           "${REPRO_FLUTTER_DIR}/bin/flutter" pub get --enforce-lockfile
 
       - name: Resolve arm64-v8a Go dependencies
-        working-directory: ${{ env.REPRO_BUILD_DIR }}/android/gvisor
+        working-directory: ${{ env.REPRO_SOURCE_DIR }}/android/gvisor
         run: |
           go mod download
           go version
           go env GOTOOLCHAIN GOVERSION GOOS GOARCH CGO_ENABLED
 
       - name: Build arm64-v8a release APK
-        working-directory: ${{ env.REPRO_BUILD_DIR }}
+        working-directory: ${{ env.REPRO_SOURCE_DIR }}
         env:
           TUNNEL_FORGE_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/upload-keystore.jks
           TUNNEL_FORGE_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -234,42 +239,41 @@ jobs:
       - name: Collect arm64-v8a release APK
         run: |
           mkdir -p dist
-          cp "${REPRO_BUILD_DIR}/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk" \
+          cp "${REPRO_SOURCE_DIR}/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk" \
             "dist/tunnel-forge-${{ steps.tag.outputs.tag }}-android-arm64-v8a.apk"
 
       - name: Prepare x86_64 source workspace
         run: |
-          rm -rf "${REPRO_BUILD_DIR}"
-          mkdir -p "${REPRO_BUILD_DIR}"
+          rm -rf "${REPRO_SOURCE_DIR}"
+          mkdir -p "${REPRO_SOURCE_DIR}"
 
           rsync -a --delete \
             --exclude build \
             --exclude .dart_tool \
             --exclude .gradle \
-            ./ "${REPRO_BUILD_DIR}/"
+            ./ "${REPRO_SOURCE_DIR}/"
 
           {
             echo "flutter.sdk=${REPRO_FLUTTER_DIR}"
             echo "sdk.dir=${REPRO_ANDROID_SDK}"
             echo "ndk.dir=${REPRO_ANDROID_SDK}/ndk/${ANDROID_NDK}"
-          } > "${REPRO_BUILD_DIR}/android/local.properties"
+          } > "${REPRO_SOURCE_DIR}/android/local.properties"
 
-      - name: Resolve x86_64 dependencies
-        working-directory: ${{ env.REPRO_BUILD_DIR }}
+      - name: Resolve x86_64 Flutter dependencies
+        working-directory: ${{ env.REPRO_SOURCE_DIR }}
         run: |
           export PUB_CACHE="$(pwd)/.pub-cache"
-          "${REPRO_FLUTTER_DIR}/bin/flutter" config --no-analytics
           "${REPRO_FLUTTER_DIR}/bin/flutter" pub get --enforce-lockfile
 
       - name: Resolve x86_64 Go dependencies
-        working-directory: ${{ env.REPRO_BUILD_DIR }}/android/gvisor
+        working-directory: ${{ env.REPRO_SOURCE_DIR }}/android/gvisor
         run: |
           go mod download
           go version
           go env GOTOOLCHAIN GOVERSION GOOS GOARCH CGO_ENABLED
 
       - name: Build x86_64 release APK
-        working-directory: ${{ env.REPRO_BUILD_DIR }}
+        working-directory: ${{ env.REPRO_SOURCE_DIR }}
         env:
           TUNNEL_FORGE_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/upload-keystore.jks
           TUNNEL_FORGE_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -281,7 +285,7 @@ jobs:
 
       - name: Collect x86_64 release APK
         run: |
-          cp "${REPRO_BUILD_DIR}/build/app/outputs/flutter-apk/app-x86_64-release.apk" \
+          cp "${REPRO_SOURCE_DIR}/build/app/outputs/flutter-apk/app-x86_64-release.apk" \
             "dist/tunnel-forge-${{ steps.tag.outputs.tag }}-android-x86_64.apk"
 
       - name: Generate checksums
