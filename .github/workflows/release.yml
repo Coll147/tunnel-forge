@@ -15,12 +15,23 @@ permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.event.inputs.release_tag || github.ref }}
   cancel-in-progress: false
 
 env:
+  # Keep this exact key because fdroiddata reads it from this workflow.
   flutter-version: '90673a4eef275d1a6692c26ac80d6d746d41a73a'
-  FLUTTER_VERSION: 3.41.2
+
+  FLUTTER_GIT_REVISION: '90673a4eef275d1a6692c26ac80d6d746d41a73a'
+  FLUTTER_VERSION: '3.41.2'
+
+  ANDROID_PLATFORM: 'android-35'
+  ANDROID_BUILD_TOOLS: '35.0.0'
+  ANDROID_CMAKE: '3.22.1'
+  ANDROID_NDK: '28.2.13676358'
+
+  # This path is intentionally stable so release APKs are deterministic.
+  RELEASE_BUILD_DIR: /builds/fdroid/fdroiddata/build/io.github.evokelektrique.tunnelforge
 
 defaults:
   run:
@@ -28,18 +39,18 @@ defaults:
 
 jobs:
   publish-release:
-    name: publish-release
+    name: Publish release
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
-      - name: Checkout
+      - name: Checkout release source
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
           ref: ${{ github.event.inputs.release_tag || github.ref }}
 
-      - name: Validate tag trigger
+      - name: Validate release tag
         id: tag
         run: |
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
@@ -59,6 +70,7 @@ jobs:
 
           app_version="$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d'+' -f1)"
           expected_tag="v${app_version}"
+
           if [[ "${tag}" != "${expected_tag}" ]]; then
             echo "Tag ${tag} does not match pubspec version ${app_version}" >&2
             exit 1
@@ -80,25 +92,44 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Prepare Android Go dependencies
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: android/gvisor/go.mod
-          cache: true
-          cache-dependency-path: android/gvisor/go.sum
+      - name: Pin Flutter revision
+        run: |
+          git -C "${FLUTTER_ROOT}" checkout -f "${FLUTTER_GIT_REVISION}"
+          flutter --version
+
+      - name: Install Android build toolchain
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+
+          yes | sdkmanager \
+            "platforms;${ANDROID_PLATFORM}" \
+            "build-tools;${ANDROID_BUILD_TOOLS}" \
+            "cmake;${ANDROID_CMAKE}" \
+            "ndk;${ANDROID_NDK}"
+
+      - name: Install Go
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y golang-go
+          go version
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5.0.2
 
-      - name: Get dependencies
-        run: flutter pub get
+      - name: Prepare deterministic release workspace
+        run: |
+          sudo mkdir -p "$(dirname "${RELEASE_BUILD_DIR}")"
+          sudo chown -R "$USER:$USER" /builds
 
-      - name: Download Android Go module dependencies
-        working-directory: android/gvisor
-        run: go mod download
+          rsync -a --delete \
+            --exclude build \
+            --exclude .dart_tool \
+            --exclude .gradle \
+            --exclude .git \
+            ./ "${RELEASE_BUILD_DIR}/"
 
       - name: Create Android local.properties
-        working-directory: android
+        working-directory: ${{ env.RELEASE_BUILD_DIR }}/android
         run: |
           flutter_root="${FLUTTER_ROOT:-$(dirname "$(dirname "$(command -v flutter)")")}"
           android_sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
@@ -111,6 +142,7 @@ jobs:
           {
             echo "flutter.sdk=${flutter_root}"
             echo "sdk.dir=${android_sdk_root}"
+            echo "ndk.dir=${android_sdk_root}/ndk/${ANDROID_NDK}"
           } > local.properties
 
       - name: Configure Android release signing
@@ -135,35 +167,66 @@ jobs:
           printf '%s' "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > "${TUNNEL_FORGE_ANDROID_KEYSTORE_PATH}"
           chmod 600 "${TUNNEL_FORGE_ANDROID_KEYSTORE_PATH}"
 
-      - name: Build release APK
+      - name: Resolve Flutter dependencies
+        working-directory: ${{ env.RELEASE_BUILD_DIR }}
+        run: |
+          flutter pub get --enforce-lockfile
+
+      - name: Resolve Android Go dependencies
+        working-directory: ${{ env.RELEASE_BUILD_DIR }}/android/gvisor
+        run: |
+          go mod download
+          go version
+          go env GOTOOLCHAIN GOVERSION GOOS GOARCH CGO_ENABLED
+
+      - name: Build arm64-v8a release APK
+        working-directory: ${{ env.RELEASE_BUILD_DIR }}
         env:
           TUNNEL_FORGE_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/upload-keystore.jks
           TUNNEL_FORGE_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           TUNNEL_FORGE_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           TUNNEL_FORGE_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: flutter build apk --release --split-per-abi --target-platform android-arm64,android-x64
+        run: |
+          flutter clean
+          flutter pub get --enforce-lockfile
+          flutter build apk --release --split-per-abi --target-platform android-arm64
 
-      - name: Prepare release asset
+      - name: Collect arm64-v8a release APK
         run: |
           mkdir -p dist
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
+          cp "${RELEASE_BUILD_DIR}/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk" \
             "dist/tunnel-forge-${{ steps.tag.outputs.tag }}-android-arm64-v8a.apk"
-          if [[ -f build/app/outputs/flutter-apk/app-x86_64-release.apk ]]; then
-            cp build/app/outputs/flutter-apk/app-x86_64-release.apk \
-              "dist/tunnel-forge-${{ steps.tag.outputs.tag }}-android-x86_64.apk"
-          fi
-          (
-            cd dist
-            sha256sum ./*.apk > SHA256SUMS
-            while IFS= read -r line; do
-              checksum="${line%% *}"
-              file="${line#* }"
-              file="${file#* }"
-              printf '%s  %s\n' "${checksum}" "${file}" > "${file}.sha256"
-            done < SHA256SUMS
-          )
 
-      - name: Upload workflow artifact
+      - name: Build x86_64 release APK
+        working-directory: ${{ env.RELEASE_BUILD_DIR }}
+        env:
+          TUNNEL_FORGE_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/upload-keystore.jks
+          TUNNEL_FORGE_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          TUNNEL_FORGE_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          TUNNEL_FORGE_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          flutter clean
+          flutter pub get --enforce-lockfile
+          flutter build apk --release --split-per-abi --target-platform android-x64
+
+      - name: Collect x86_64 release APK
+        run: |
+          cp "${RELEASE_BUILD_DIR}/build/app/outputs/flutter-apk/app-x86_64-release.apk" \
+            "dist/tunnel-forge-${{ steps.tag.outputs.tag }}-android-x86_64.apk"
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum ./*.apk > SHA256SUMS
+
+          while IFS= read -r line; do
+            checksum="${line%% *}"
+            file="${line#* }"
+            file="${file#* }"
+            printf '%s  %s\n' "${checksum}" "${file}" > "${file}.sha256"
+          done < SHA256SUMS
+
+      - name: Upload workflow artifacts
         uses: actions/upload-artifact@v6
         with:
           name: tunnel-forge-${{ steps.tag.outputs.tag }}-android-release
@@ -173,7 +236,7 @@ jobs:
             dist/SHA256SUMS
           if-no-files-found: error
 
-      - name: Publish GitHub Release
+      - name: Publish GitHub release
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
