@@ -136,9 +136,17 @@ jobs:
 
       - name: Install Android build toolchain
         run: |
-          yes | "${SDKMANAGER}" --licenses >/dev/null || true
+          run_sdkmanager() {
+            set +o pipefail
+            yes 2>/dev/null | "${SDKMANAGER}" "$@"
+            status="${PIPESTATUS[1]}"
+            set -o pipefail
+            return "${status}"
+          }
 
-          yes | "${SDKMANAGER}" \
+          run_sdkmanager --licenses >/dev/null || true
+
+          run_sdkmanager --install \
             "platforms;${ANDROID_PLATFORM}" \
             "build-tools;${ANDROID_BUILD_TOOLS}" \
             "cmake;${ANDROID_CMAKE}" \
