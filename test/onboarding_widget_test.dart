@@ -88,7 +88,12 @@ void main() {
     await tester.pump();
 
     final scrollPosition = tester
-        .state<ScrollableState>(find.byKey(const Key('onboarding_scroll_view')))
+        .state<ScrollableState>(
+          find.descendant(
+            of: find.byKey(const Key('onboarding_scroll_view')),
+            matching: find.byType(Scrollable),
+          ),
+        )
         .position;
     expect(scrollPosition.maxScrollExtent, greaterThan(0));
 
