@@ -37,37 +37,48 @@ class _OnboardingPageState extends State<OnboardingPage>
                     builder: (context, constraints) {
                       final compact = constraints.maxHeight < 760;
                       final maxContentWidth = isLanguage ? 720.0 : 480.0;
-                      return Center(
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(
-                            maxWidth: maxContentWidth,
-                          ),
-                          child: Padding(
-                            padding: EdgeInsets.fromLTRB(
-                              24,
-                              compact ? 16 : 22,
-                              24,
-                              compact ? 18 : 24,
-                            ),
-                            child: _OnboardingContent(
-                              state: state,
-                              isLanguage: isLanguage,
-                              isIntro: isIntro,
-                              compact: compact,
-                              onContinue: () => context
-                                  .read<OnboardingBloc>()
-                                  .add(const OnboardingContinuePressed()),
-                              onCheckboxChanged: (value) =>
-                                  context.read<OnboardingBloc>().add(
-                                    OnboardingCheckboxChanged(value ?? false),
+                      return CustomScrollView(
+                        key: const Key('onboarding_scroll_view'),
+                        physics: const ClampingScrollPhysics(),
+                        slivers: [
+                          SliverFillRemaining(
+                            hasScrollBody: false,
+                            child: Center(
+                              child: ConstrainedBox(
+                                constraints: BoxConstraints(
+                                  maxWidth: maxContentWidth,
+                                ),
+                                child: Padding(
+                                  padding: EdgeInsets.fromLTRB(
+                                    24,
+                                    compact ? 16 : 22,
+                                    24,
+                                    compact ? 18 : 24,
                                   ),
-                              onAgree: () => context.read<OnboardingBloc>().add(
-                                const OnboardingAgreePressed(),
+                                  child: _OnboardingContent(
+                                    state: state,
+                                    isLanguage: isLanguage,
+                                    isIntro: isIntro,
+                                    compact: compact,
+                                    onContinue: () => context
+                                        .read<OnboardingBloc>()
+                                        .add(const OnboardingContinuePressed()),
+                                    onCheckboxChanged: (value) =>
+                                        context.read<OnboardingBloc>().add(
+                                          OnboardingCheckboxChanged(
+                                            value ?? false,
+                                          ),
+                                        ),
+                                    onAgree: () => context
+                                        .read<OnboardingBloc>()
+                                        .add(const OnboardingAgreePressed()),
+                                    onCancel: () => Navigator.of(context).pop(),
+                                  ),
+                                ),
                               ),
-                              onCancel: () => Navigator.of(context).pop(),
                             ),
                           ),
-                        ),
+                        ],
                       );
                     },
                   ),

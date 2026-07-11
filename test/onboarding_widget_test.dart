@@ -76,6 +76,36 @@ void main() {
     expect(find.text('Back'), findsNothing);
   });
 
+  testWidgets('onboarding content scrolls on a compact display', (
+    tester,
+  ) async {
+    await pumpApp(
+      tester,
+      onboardingRepository: _FakeOnboardingRepository(),
+      appExitController: _FakeAppExitController(),
+    );
+    await tester.binding.setSurfaceSize(const Size(320, 480));
+    await tester.pump();
+
+    final scrollPosition = tester
+        .state<ScrollableState>(find.byKey(const Key('onboarding_scroll_view')))
+        .position;
+    expect(scrollPosition.maxScrollExtent, greaterThan(0));
+
+    await tester.drag(
+      find.byKey(const Key('onboarding_scroll_view')),
+      const Offset(0, -240),
+    );
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(
+      tester
+          .getRect(find.byKey(const Key('onboarding_continue_button')))
+          .bottom,
+      lessThanOrEqualTo(480),
+    );
+  });
+
   testWidgets('accepted onboarding skips directly to home', (tester) async {
     await pumpApp(
       tester,
