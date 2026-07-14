@@ -5,7 +5,7 @@
 <h1 align="center">TunnelForge</h1>
 
 <p align="center">
-  Flutter app for Android L2TP/IPsec (IKEv1), with VPN tunnel mode, proxy-only mode,
+  L2TP/IPsec (IKEv1) for modern Android, with full-device VPN, proxy-only mode,
   and per-app routing.
 </p>
 
@@ -27,6 +27,16 @@
   </a>
   <a href="https://github.com/evokelektrique/tunnel-forge/blob/main/LICENSE" style="text-decoration: none;">
     <img alt="License GPL-3.0" src="https://img.shields.io/github/license/evokelektrique/tunnel-forge?label=License">
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://f-droid.org/packages/io.github.evokelektrique.tunnelforge/">
+    <img
+      src="https://f-droid.org/badge/get-it-on.svg"
+      alt="Get it on F-Droid"
+      height="80"
+    >
   </a>
 </p>
 
@@ -77,7 +87,20 @@ TunnelForge is an Android client for those setups. It connects to existing L2TP/
 
 ## Install
 
-Download the APK from [GitHub Releases](https://github.com/evokelektrique/tunnel-forge/releases/latest). TunnelForge is only the client; you still need access to a compatible L2TP/IPsec server.
+### F-Droid
+
+[<img src="https://f-droid.org/badge/get-it-on.svg" alt="Get it on F-Droid" height="80">](https://f-droid.org/packages/io.github.evokelektrique.tunnelforge/)
+
+Install TunnelForge from F-Droid to receive updates through your F-Droid client.
+
+### GitHub Releases
+
+You can also download the latest APK directly from
+[GitHub Releases](https://github.com/evokelektrique/tunnel-forge/releases/latest)
+for manual installation.
+
+> TunnelForge is only the client; you still need access to a compatible
+L2TP/IPsec server.
 
 ## Development
 
