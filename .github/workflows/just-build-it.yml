@@ -58,6 +58,9 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c
 
+      - name: Clean previous builds
+        run: flutter clean
+
       - name: Get Flutter dependencies
         run: flutter pub get
 
@@ -81,12 +84,33 @@ jobs:
             echo "sdk.dir=${android_sdk_root}"
           } > local.properties
 
-      - name: Build release APK (using debug keystore)
-        run: flutter build apk --release
+      # --- Firma con la keystore de depuración explícitamente ---
+      - name: Create debug keystore (if missing)
+        run: |
+          if [ ! -f ~/.android/debug.keystore ]; then
+            keytool -genkey -v -keystore ~/.android/debug.keystore -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname "CN=Android Debug, O=Android, C=US"
+          fi
+
+      - name: Build release APK (universal)
+        run: |
+          flutter build apk --release --no-split-per-abi
+
+      - name: Verify APK exists and is not empty
+        run: |
+          APK_PATH="build/app/outputs/flutter-apk/app-release.apk"
+          if [ ! -f "$APK_PATH" ]; then
+            echo "❌ APK not found at $APK_PATH"
+            exit 1
+          fi
+          if [ ! -s "$APK_PATH" ]; then
+            echo "❌ APK is empty"
+            exit 1
+          fi
+          echo "✅ APK size: $(du -h "$APK_PATH" | cut -f1)"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v6
         with:
           name: tunnel-forge-release-apk
-          path: build/app/outputs/flutter-apk/*.apk
+          path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
