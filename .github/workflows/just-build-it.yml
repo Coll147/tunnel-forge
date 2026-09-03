@@ -1,22 +1,10 @@
-name: Build APK
+name: Build APK (manual)
 
 on:
-  pull_request:
-    branches:
-      - main
-      - release/**
-  push:
-    branches:
-      - main
-      - release/**
   workflow_dispatch:
 
 permissions:
   contents: read
-
-concurrency:
-  group: build-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
 
 env:
   FLUTTER_VERSION: 3.41.2
@@ -84,11 +72,14 @@ jobs:
             echo "sdk.dir=${android_sdk_root}"
           } > local.properties
 
-      # --- Firma con la keystore de depuración explícitamente ---
-      - name: Create debug keystore (if missing)
+      - name: Create debug keystore directory and key
         run: |
+          mkdir -p ~/.android
           if [ ! -f ~/.android/debug.keystore ]; then
-            keytool -genkey -v -keystore ~/.android/debug.keystore -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname "CN=Android Debug, O=Android, C=US"
+            keytool -genkey -v -keystore ~/.android/debug.keystore \
+              -alias androiddebugkey -keyalg RSA -keysize 2048 \
+              -validity 10000 -storepass android -keypass android \
+              -dname "CN=Android Debug, O=Android, C=US"
           fi
 
       - name: Build release APK (universal)
