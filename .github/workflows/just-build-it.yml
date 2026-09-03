@@ -82,9 +82,8 @@ jobs:
               -dname "CN=Android Debug, O=Android, C=US"
           fi
 
-      - name: Build release APK (universal)
-        run: |
-          flutter build apk --release --no-split-per-abi
+      - name: Build release APK
+        run: flutter build apk --release
 
       - name: Verify APK exists and is not empty
         run: |
