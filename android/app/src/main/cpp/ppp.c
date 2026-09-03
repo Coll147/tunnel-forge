@@ -507,7 +507,7 @@ static int ppp_lcp_negotiate(int esp_fd, esp_keys_t *esp, const struct sockaddr 
             (void)lcp_parse_peer_mru(p + 2u, (size_t)lcp_len, &peer_mru);
             // Observed Configure-Reject body `03 05 c2 23 05` (CHAP) with MRU+ACCM+CHAP CR: omit
             // Authentication-Protocol from our CR; peer already proposed CHAP in their Configure-Request.
-            lcp_auth_in_cr = 0;
+            lcp_auth_in_cr = 1;
             plen = lcp_build_cr(pkt, sizeof(pkt), id, auth, cr_mru, lcp_out_include_ac, lcp_accm_in_cr, lcp_auth_in_cr);
             if (plen < 0)
               return -1;
